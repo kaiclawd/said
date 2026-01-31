@@ -1,0 +1,19 @@
+[package]
+name = "said"
+version = "0.1.0"
+description = "Solana Agent Identity Standard - Identity, Reputation, and Validation for AI Agents"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "said"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.30.1"
