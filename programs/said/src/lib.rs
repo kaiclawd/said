@@ -3,6 +3,11 @@ use anchor_lang::system_program;
 
 declare_id!("SAiD111111111111111111111111111111111111111");
 
+// ============ HARDCODED CONSTANTS ============
+// Treasury authority - ONLY this wallet can initialize treasury and withdraw fees
+// This protects against forks: anyone deploying this code as-is cannot change the authority
+pub const TREASURY_AUTHORITY: Pubkey = pubkey!("H8nKbwHTTmnjgnsvqxRDpoEcTkU6uoqs4DcLm4kY55Wp");
+
 // Protocol fees (in lamports)
 pub const VERIFICATION_FEE: u64 = 10_000_000; // 0.01 SOL - verified badge
 pub const VALIDATION_FEE: u64 = 1_000_000;    // 0.001 SOL - work validation
@@ -11,10 +16,16 @@ pub const VALIDATION_FEE: u64 = 1_000_000;    // 0.001 SOL - work validation
 pub mod said {
     use super::*;
 
-    /// Initialize the protocol treasury
+    /// Initialize the protocol treasury (authority must match hardcoded TREASURY_AUTHORITY)
     pub fn initialize_treasury(ctx: Context<InitializeTreasury>) -> Result<()> {
+        // Verify the signer is the hardcoded authority
+        require!(
+            ctx.accounts.authority.key() == TREASURY_AUTHORITY,
+            SaidError::UnauthorizedAuthority
+        );
+        
         let treasury = &mut ctx.accounts.treasury;
-        treasury.authority = ctx.accounts.authority.key();
+        treasury.authority = TREASURY_AUTHORITY; // Always set to hardcoded value
         treasury.total_collected = 0;
         treasury.bump = ctx.bumps.treasury;
         Ok(())
@@ -178,11 +189,12 @@ pub mod said {
 
 // ============ ACCOUNTS ============
 
-#[derive(Accounts)]
 #[error_code]
 pub enum SaidError {
     #[msg("Insufficient treasury balance for withdrawal")]
     InsufficientTreasuryBalance,
+    #[msg("Unauthorized: only the hardcoded treasury authority can perform this action")]
+    UnauthorizedAuthority,
 }
 
 #[derive(Accounts)]
@@ -191,11 +203,13 @@ pub struct WithdrawFees<'info> {
         mut,
         seeds = [b"treasury"],
         bump = treasury.bump,
-        has_one = authority
     )]
     pub treasury: Account<'info, Treasury>,
     
-    #[account(mut)]
+    #[account(
+        mut,
+        address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
+    )]
     pub authority: Signer<'info>,
 }
 
@@ -210,7 +224,10 @@ pub struct InitializeTreasury<'info> {
     )]
     pub treasury: Account<'info, Treasury>,
     
-    #[account(mut)]
+    #[account(
+        mut,
+        address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
+    )]
     pub authority: Signer<'info>,
     
     pub system_program: Program<'info, System>,
