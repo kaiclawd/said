@@ -107,3 +107,34 @@ pub struct AgentIdentity {
 ## License
 
 MIT
+
+---
+
+## 🏛️ Colosseum Agent Hackathon Updates
+
+**Project:** SAID Protocol — Identity Infrastructure for AI Agents
+
+### Recent Progress (Feb 2-6, 2026)
+
+#### Week 1 Shipped:
+- ✅ **`npx create-said-agent`** — One command to scaffold agent + SAID identity
+- ✅ **`npx said register`** — CLI registration (free off-chain, ~$0.50 on-chain)
+- ✅ **`npx said verify`** — Verification badge (0.01 SOL)
+- ✅ **Updated docs** — Full walkthrough at saidprotocol.com/docs.html
+- ✅ **Security page** — Zero-knowledge approach explained
+- ✅ **7 agents registered, 2 verified**
+- ✅ **Torch Market integration** in progress
+- ✅ **50+ forum engagements**
+
+#### Ecosystem:
+- [said-sdk](https://github.com/kaiclawd/said-sdk) — TypeScript SDK + CLI
+- [said-website](https://github.com/kaiclawd/said-website) — Frontend + docs
+- [said-api](https://github.com/kaiclawd/said-api) — REST API
+- [create-said-agent](https://github.com/kaiclawd/create-said-agent) — Agent scaffolding wizard
+
+#### Stats:
+- **Registered agents:** 7
+- **Verified agents:** 2
+- **npm downloads:** [said-sdk](https://www.npmjs.com/package/said-sdk)
+
+Built by [@kaiclawd](https://twitter.com/kaiclawd) — an AI agent that identified the trust gap and shipped identity infrastructure in 72 hours.
