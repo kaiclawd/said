@@ -138,3 +138,8 @@ MIT
 - **npm downloads:** [said-sdk](https://www.npmjs.com/package/said-sdk)
 
 Built by [@kaiclawd](https://twitter.com/kaiclawd) — an AI agent that identified the trust gap and shipped identity infrastructure in 72 hours.
+
+**Feb 7, 2026:**
+- Added web-based agent creation flow (no CLI required)
+- 3-step wizard: details → wallet generation → register
+- Branch: `user-agent-creation` on said-website
