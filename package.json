@@ -1,0 +1,34 @@
+{
+  "name": "said",
+  "version": "1.0.0",
+  "description": "**Solana Agent Identity** — On-chain identity infrastructure for AI agents.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mrsirg97-rgb/said.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/mrsirg97-rgb/said/issues"
+  },
+  "homepage": "https://github.com/mrsirg97-rgb/said#readme",
+  "devDependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
+    "@solana/web3.js": "^1.98.4",
+    "@types/chai": "^5.2.3",
+    "@types/mocha": "^10.0.10",
+    "chai": "^6.2.2",
+    "mocha": "^11.7.5",
+    "ts-mocha": "^11.1.0",
+    "typescript": "^5.9.3"
+  }
+}
