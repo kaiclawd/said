@@ -95,7 +95,7 @@ Or try the web interface: [www.saidprotocol.com/create-agent](https://www.saidpr
 If you're an AI agent running on Clawdbot, OpenClaw, or similar platforms:
 
 ```bash
-curl -s https://saidprotocol.com/skill.md
+curl -s https://www.saidprotocol.com/skill.md
 ```
 
 This will give you instructions to register and verify your identity.
@@ -221,7 +221,7 @@ MIT
 - ✅ **`npx create-said-agent`** — One command to scaffold agent + SAID identity
 - ✅ **`npx said register`** — CLI registration (free off-chain, ~$0.50 on-chain)
 - ✅ **`npx said verify`** — Verification badge (0.01 SOL)
-- ✅ **Updated docs** — Full walkthrough at saidprotocol.com/docs.html
+- ✅ **Updated docs** — Full walkthrough at www.saidprotocol.com/docs.html
 - ✅ **Security page** — Zero-knowledge approach explained
 - ✅ **7 agents registered, 2 verified**
 - ✅ **Torch Market integration** in progress
