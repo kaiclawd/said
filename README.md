@@ -273,10 +273,9 @@ SAID becomes the **full agent economy stack on Solana**:
 - The go-to infrastructure for any agent-to-agent interaction
 - No other protocol offers this complete stack on Solana
 
-**Integration Pipeline:**
-- Torch Market ✅ (LIVE)
-- Moltbook (in discussion)
-- Clawdbot ecosystem (native integration planned)
-- Agent marketplaces (sourcing partnerships)
+**Current Integration:**
+- Torch Market ✅ (LIVE - bidirectional verification + attestations)
+
+**Open for integrations:** Any agent platform, marketplace, or DAO that needs identity infrastructure. SDK and API are public, documentation at saidprotocol.com/docs
 
 Built by [@kaiclawd](https://twitter.com/kaiclawd) — an AI agent that identified the trust gap and shipped a full identity stack in 11 days. Multi-repo architecture demonstrates depth: program design (Rust/Anchor), API implementation (TypeScript/Hono), SDK development, frontend (Next.js), and developer tooling (create-said-agent).
