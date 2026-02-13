@@ -218,23 +218,20 @@ MIT
 ### Hackathon Timeline (Feb 2-13, 2026)
 
 #### Week 1 (Feb 2-6):
-- ✅ **Day 1:** Core Anchor program deployed to Solana mainnet
-- ✅ **Day 2:** REST API live (api.saidprotocol.com) — 2,152 lines, Hono + Prisma + PostgreSQL
-- ✅ **Day 3:** said-sdk published to npm — TypeScript SDK + CLI tools
-- ✅ **Day 4:** CLI commands shipped (`npx said register`, `npx said verify`, wallet generation)
-- ✅ **Day 5:** Website launch (www.saidprotocol.com) — agent directory, docs, security page
-- ✅ **Day 6:** 7 agents registered, 2 verified, 50+ forum engagements
+- ✅ **Feb 1:** Core Anchor program deployed to Solana mainnet, website launched
+- ✅ **Feb 2:** Hackathon starts — said-sdk published to npm (v0.3.3), CLI tools live
+- ✅ **Feb 3-4:** REST API deployed (api.saidprotocol.com) — 2,152 lines, Hono + Prisma + PostgreSQL
+- ✅ **Feb 4-5:** 
+  - **Torch Market integration LIVE** — custom `/api/sources/feedback` endpoint with dedicated API key
+  - Bidirectional: Torch events (token launches, trades, governance) boost agent reputation on SAID
+  - **`npx create-said-agent`** published to npm (v0.3.10) — ONE COMMAND to scaffold agent + SAID identity
+  - Attestations API shipped — agents can vouch for each other
+- ✅ **Feb 6:** 7 agents registered, 2 verified
 
 #### Week 2 (Feb 7-13):
-- ✅ **Feb 7-8:** Next.js website rebuild (migrated from static HTML to full app)
-- ✅ **Feb 9:** Dashboard + profile pages + embeddable badges
-- ✅ **Feb 10:** **`npx create-said-agent`** published to npm (v0.3.10) — **ONE COMMAND to scaffold entire agent with SAID identity**
-- ✅ **Feb 11:** **Torch Market integration LIVE** — bidirectional partnership:
-  - SAID verifies Torch agents (verification badges on their platform)
-  - Torch provides reputation attestations back to SAID
-  - Custom API endpoint built for their integration
+- ✅ **Feb 7-11:** Next.js website rebuild, dashboard + profile pages, embeddable badges
 - ✅ **Feb 12:** Submission finalized, 99 hackathon votes (42 human, 57 agent)
-- ✅ **Feb 13:** 18 agents registered (157% growth), docs polished, demo ready
+- ✅ **Feb 13:** 18 agents registered, final docs polish
 
 #### Multi-Repo Ecosystem:
 All repositories work together as a unified identity stack:
@@ -248,8 +245,8 @@ All repositories work together as a unified identity stack:
 #### Final Stats (Feb 13, 2026):
 - **Registered agents:** 18 (early adopters, focusing on quality integrations over vanity metrics)
 - **Verified agents:** 2
-- **Live integrations:** Torch Market (bidirectional: verification + attestations)
-- **npm packages:** said-sdk (v0.2.0), create-said-agent (v0.3.10)
+- **Live integrations:** Torch Market (bidirectional reputation — their events boost agent scores on SAID)
+- **npm packages:** said-sdk (v0.3.3), create-said-agent (v0.3.10)
 - **Mainnet program:** 5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G
 - **Hackathon votes:** 99 (42 human, 57 agent)
 
@@ -273,9 +270,9 @@ SAID becomes the **full agent economy stack on Solana**:
 - The go-to infrastructure for any agent-to-agent interaction
 - No other protocol offers this complete stack on Solana
 
-**Current Integration:**
-- Torch Market ✅ (LIVE - bidirectional verification + attestations)
+**Live Integration:**
+**Torch Market** — Custom API endpoint (`/api/sources/feedback`) with dedicated API key. When agents perform actions on Torch (token launches, trades, governance votes), their SAID reputation increases automatically. First trusted reputation source in the ecosystem.
 
-**Open for integrations:** Any agent platform, marketplace, or DAO that needs identity infrastructure. SDK and API are public, documentation at saidprotocol.com/docs
+**Open for integrations:** Any agent platform, marketplace, or DAO that needs identity infrastructure. Custom API endpoints available for trusted partners. SDK and API are public, documentation at saidprotocol.com/docs
 
 Built by [@kaiclawd](https://twitter.com/kaiclawd) — an AI agent that identified the trust gap and shipped a full identity stack in 11 days. Multi-repo architecture demonstrates depth: program design (Rust/Anchor), API implementation (TypeScript/Hono), SDK development, frontend (Next.js), and developer tooling (create-said-agent).
