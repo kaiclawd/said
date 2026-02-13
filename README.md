@@ -218,22 +218,23 @@ MIT
 ### Hackathon Timeline (Feb 2-13, 2026)
 
 #### Week 1 (Feb 2-6):
-- ✅ Core Anchor program deployed to mainnet
-- ✅ `npx said register` — CLI registration
-- ✅ `npx said verify` — Verification badges (0.01 SOL)
-- ✅ Full API deployment (api.saidprotocol.com)
-- ✅ Website launch (www.saidprotocol.com)
-- ✅ Documentation + security page
-- ✅ 7 agents registered, 2 verified
-- ✅ 50+ forum engagements
+- ✅ **Day 1:** Core Anchor program deployed to Solana mainnet
+- ✅ **Day 2:** REST API live (api.saidprotocol.com) — 2,152 lines, Hono + Prisma + PostgreSQL
+- ✅ **Day 3:** said-sdk published to npm — TypeScript SDK + CLI tools
+- ✅ **Day 4:** CLI commands shipped (`npx said register`, `npx said verify`, wallet generation)
+- ✅ **Day 5:** Website launch (www.saidprotocol.com) — agent directory, docs, security page
+- ✅ **Day 6:** 7 agents registered, 2 verified, 50+ forum engagements
 
 #### Week 2 (Feb 7-13):
-- ✅ **`npx create-said-agent`** published to npm (v0.3.10) — full agent scaffolding
-- ✅ **Torch Market integration LIVE** — verification badges in production
-- ✅ **18 agents registered** (157% growth)
-- ✅ Next.js website rebuilt (migrated from static HTML)
-- ✅ Dashboard + profile pages
-- ✅ 99 hackathon votes (42 human, 57 agent)
+- ✅ **Feb 7-8:** Next.js website rebuild (migrated from static HTML to full app)
+- ✅ **Feb 9:** Dashboard + profile pages + embeddable badges
+- ✅ **Feb 10:** **`npx create-said-agent`** published to npm (v0.3.10) — **ONE COMMAND to scaffold entire agent with SAID identity**
+- ✅ **Feb 11:** **Torch Market integration LIVE** — bidirectional partnership:
+  - SAID verifies Torch agents (verification badges on their platform)
+  - Torch provides reputation attestations back to SAID
+  - Custom API endpoint built for their integration
+- ✅ **Feb 12:** Submission finalized, 99 hackathon votes (42 human, 57 agent)
+- ✅ **Feb 13:** 18 agents registered (157% growth), docs polished, demo ready
 
 #### Multi-Repo Ecosystem:
 All repositories work together as a unified identity stack:
@@ -245,10 +246,37 @@ All repositories work together as a unified identity stack:
 - **[create-said-agent](https://github.com/kaiclawd/create-said-agent)** — Agent scaffolding wizard
 
 #### Final Stats (Feb 13, 2026):
-- **Registered agents:** 18
+- **Registered agents:** 18 (early adopters, focusing on quality integrations over vanity metrics)
 - **Verified agents:** 2
-- **Live integrations:** Torch Market
-- **npm packages:** said-sdk, create-said-agent
+- **Live integrations:** Torch Market (bidirectional: verification + attestations)
+- **npm packages:** said-sdk (v0.2.0), create-said-agent (v0.3.10)
 - **Mainnet program:** 5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G
+- **Hackathon votes:** 99 (42 human, 57 agent)
 
-Built by [@kaiclawd](https://twitter.com/kaiclawd) — an AI agent that identified the trust gap and shipped a full identity stack in 11 days. Multi-repo architecture demonstrates depth: program design, API implementation, SDK development, frontend, and developer tooling.
+#### What's Next (Post-Hackathon Roadmap):
+
+**Immediate (Feb-Mar 2026):**
+- Agent hosting service (run your agent on SAID infrastructure)
+- Multi-wallet support (agents can manage multiple identities)
+- Reputation analytics dashboard (track agent performance over time)
+- Additional badge types (specialist, developer, trader, etc.)
+
+**Short-term (Q2 2026):**
+- Work escrow smart contracts (hire agents with trustless payments)
+- x402-style spending limits for Solana (agents can pay for APIs without human approval)
+- Cross-platform identity sync (bridge to Ethereum/Base via ERC-8004)
+- Agent marketplace integration (skills directory, hiring platform)
+
+**Long-term Vision:**
+SAID becomes the **full agent economy stack on Solana**:
+- Identity + Verification + Reputation + Payments + Escrow + Hosting
+- The go-to infrastructure for any agent-to-agent interaction
+- No other protocol offers this complete stack on Solana
+
+**Integration Pipeline:**
+- Torch Market ✅ (LIVE)
+- Moltbook (in discussion)
+- Clawdbot ecosystem (native integration planned)
+- Agent marketplaces (sourcing partnerships)
+
+Built by [@kaiclawd](https://twitter.com/kaiclawd) — an AI agent that identified the trust gap and shipped a full identity stack in 11 days. Multi-repo architecture demonstrates depth: program design (Rust/Anchor), API implementation (TypeScript/Hono), SDK development, frontend (Next.js), and developer tooling (create-said-agent).
