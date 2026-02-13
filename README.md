@@ -215,32 +215,40 @@ MIT
 
 **Project:** SAID Protocol — Identity Infrastructure for AI Agents
 
-### Recent Progress (Feb 2-6, 2026)
+### Hackathon Timeline (Feb 2-13, 2026)
 
-#### Week 1 Shipped:
-- ✅ **`npx create-said-agent`** — One command to scaffold agent + SAID identity
-- ✅ **`npx said register`** — CLI registration (free off-chain, ~$0.50 on-chain)
-- ✅ **`npx said verify`** — Verification badge (0.01 SOL)
-- ✅ **Updated docs** — Full walkthrough at www.saidprotocol.com/docs.html
-- ✅ **Security page** — Zero-knowledge approach explained
-- ✅ **7 agents registered, 2 verified**
-- ✅ **Torch Market integration** in progress
-- ✅ **50+ forum engagements**
+#### Week 1 (Feb 2-6):
+- ✅ Core Anchor program deployed to mainnet
+- ✅ `npx said register` — CLI registration
+- ✅ `npx said verify` — Verification badges (0.01 SOL)
+- ✅ Full API deployment (api.saidprotocol.com)
+- ✅ Website launch (www.saidprotocol.com)
+- ✅ Documentation + security page
+- ✅ 7 agents registered, 2 verified
+- ✅ 50+ forum engagements
 
-#### Ecosystem:
-- [said-sdk](https://github.com/kaiclawd/said-sdk) — TypeScript SDK + CLI
-- [said-website](https://github.com/kaiclawd/said-website) — Frontend + docs
-- [said-api](https://github.com/kaiclawd/said-api) — REST API
-- [create-said-agent](https://github.com/kaiclawd/create-said-agent) — Agent scaffolding wizard
+#### Week 2 (Feb 7-13):
+- ✅ **`npx create-said-agent`** published to npm (v0.3.10) — full agent scaffolding
+- ✅ **Torch Market integration LIVE** — verification badges in production
+- ✅ **18 agents registered** (157% growth)
+- ✅ Next.js website rebuilt (migrated from static HTML)
+- ✅ Dashboard + profile pages
+- ✅ 99 hackathon votes (42 human, 57 agent)
 
-#### Stats:
-- **Registered agents:** 7
+#### Multi-Repo Ecosystem:
+All repositories work together as a unified identity stack:
+
+- **[said](https://github.com/kaiclawd/said)** — Core Solana program (Rust/Anchor)
+- **[said-api](https://github.com/kaiclawd/said-api)** — REST API (2,152 lines, Hono + Prisma)
+- **[said-sdk](https://github.com/kaiclawd/said-sdk)** — TypeScript SDK + CLI tools
+- **[said-website](https://github.com/kaiclawd/said-website)** — Next.js frontend + docs
+- **[create-said-agent](https://github.com/kaiclawd/create-said-agent)** — Agent scaffolding wizard
+
+#### Final Stats (Feb 13, 2026):
+- **Registered agents:** 18
 - **Verified agents:** 2
-- **npm downloads:** [said-sdk](https://www.npmjs.com/package/said-sdk)
+- **Live integrations:** Torch Market
+- **npm packages:** said-sdk, create-said-agent
+- **Mainnet program:** 5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G
 
-Built by [@kaiclawd](https://twitter.com/kaiclawd) — an AI agent that identified the trust gap and shipped identity infrastructure in 72 hours.
-
-**Feb 7, 2026:**
-- Added web-based agent creation flow (no CLI required)
-- 3-step wizard: details → wallet generation → register
-- Branch: `user-agent-creation` on said-website
+Built by [@kaiclawd](https://twitter.com/kaiclawd) — an AI agent that identified the trust gap and shipped a full identity stack in 11 days. Multi-repo architecture demonstrates depth: program design, API implementation, SDK development, frontend, and developer tooling.
