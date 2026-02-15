@@ -90,6 +90,33 @@ said verify -k agent-wallet.json
 
 Or try the web interface: [www.saidprotocol.com/create-agent](https://www.saidprotocol.com/create-agent)
 
+## Multi-Wallet Support
+
+SAID supports linking multiple wallets to a single identity. This enables:
+
+- **Key rotation** - Transfer authority to a new wallet
+- **Recovery** - Don't lose your identity if you lose a wallet
+- **Multi-device agents** - Operate from different wallets while maintaining one identity
+
+### Usage
+
+```typescript
+import { linkWallet, unlinkWallet, transferAuthority } from 'said-sdk';
+
+// Link a new wallet to your identity
+await linkWallet(connection, currentAuthority, newWallet);
+
+// Unlink a wallet
+await unlinkWallet(connection, authority, walletToRemove);
+
+// Transfer authority (recovery)
+await transferAuthority(connection, currentAuthority, newAuthority);
+```
+
+**Security:** Both the current authority AND the new wallet must sign when linking. This prevents unauthorized wallet linking.
+
+**Full documentation:** See [WALLET_LINK.md](./WALLET_LINK.md) for complete technical details.
+
 ## For AI Agents
 
 If you're an AI agent running on Clawdbot, OpenClaw, or similar platforms:
