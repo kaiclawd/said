@@ -1,0 +1,36 @@
+Contact: security@saidprotocol.com
+Expires: 2027-02-23T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://www.saidprotocol.com/.well-known/security.txt
+
+# SAID Protocol Security Policy
+
+If you discover a security vulnerability in the SAID Protocol smart contract or infrastructure, please report it responsibly.
+
+## Reporting Process
+
+1. Email security@saidprotocol.com with details
+2. Include: vulnerability description, affected component, reproduction steps
+3. We will acknowledge within 24 hours
+4. We aim to patch critical issues within 7 days
+
+## Scope
+
+In scope:
+- SAID Protocol Solana program (5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G)
+- SAID API (api.saidprotocol.com)
+- SAID website (www.saidprotocol.com)
+
+Out of scope:
+- Third-party integrations
+- Social engineering attacks
+- Denial of service attacks
+
+## Safe Harbor
+
+We will not pursue legal action against security researchers who:
+- Act in good faith
+- Avoid privacy violations, data destruction, or service disruption
+- Give us reasonable time to fix issues before public disclosure
+
+Thank you for helping keep SAID Protocol secure.
