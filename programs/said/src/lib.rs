@@ -12,6 +12,19 @@ pub const TREASURY_AUTHORITY: Pubkey = pubkey!("H8nKbwHTTmnjgnsvqxRDpoEcTkU6uoqs
 pub const VERIFICATION_FEE: u64 = 10_000_000; // 0.01 SOL - verified badge
 pub const VALIDATION_FEE: u64 = 1_000_000;    // 0.001 SOL - work validation
 
+// URI validation helper
+fn validate_uri(uri: &str) -> Result<()> {
+    require!(
+        uri.len() >= 10 && uri.len() <= 200,
+        SaidError::InvalidMetadataUri
+    );
+    require!(
+        uri.starts_with("https://") || uri.starts_with("ipfs://") || uri.starts_with("ar://"),
+        SaidError::InvalidMetadataUri
+    );
+    Ok(())
+}
+
 #[program]
 pub mod said {
     use super::*;
@@ -38,6 +51,7 @@ pub mod said {
         ctx: Context<RegisterAgent>,
         metadata_uri: String,
     ) -> Result<()> {
+        validate_uri(&metadata_uri)?;
         let agent = &mut ctx.accounts.agent_identity;
         agent.owner = ctx.accounts.owner.key();
         agent.authority = ctx.accounts.owner.key(); // authority starts as owner
@@ -99,8 +113,21 @@ pub mod said {
             SaidError::InsufficientTreasuryBalance
         );
 
-        **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? -= amount;
-        **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += amount;
+        // Use CPI transfer for atomic operation (prevents partial state)
+        let treasury_seeds = &[b"treasury".as_ref(), &[treasury.bump]];
+        let signer_seeds = &[&treasury_seeds[..]];
+
+        system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: ctx.accounts.treasury.to_account_info(),
+                    to: ctx.accounts.authority.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            amount,
+        )?;
 
         emit!(FeesWithdrawn {
             authority: ctx.accounts.authority.key(),
@@ -115,6 +142,7 @@ pub mod said {
         ctx: Context<UpdateAgent>,
         new_metadata_uri: String,
     ) -> Result<()> {
+        validate_uri(&new_metadata_uri)?;
         let agent = &mut ctx.accounts.agent_identity;
         agent.metadata_uri = new_metadata_uri.clone();
 
@@ -189,6 +217,19 @@ pub mod said {
         positive: bool,
         context: String,
     ) -> Result<()> {
+        // Prevent self-voting
+        require!(
+            ctx.accounts.reviewer.key() != ctx.accounts.agent_identity.owner
+                && ctx.accounts.reviewer.key() != ctx.accounts.agent_identity.authority,
+            SaidError::CannotReviewSelf
+        );
+
+        // Limit context length
+        require!(
+            context.len() <= 500,
+            SaidError::ContextTooLong
+        );
+
         let reputation = &mut ctx.accounts.agent_reputation;
 
         // Initialize if first feedback
@@ -204,9 +245,10 @@ pub mod said {
             reputation.negative_feedback += 1;
         }
 
-        // Calculate score (basis points, 0-10000)
-        reputation.reputation_score = ((reputation.positive_feedback as u64 * 10000)
-            / reputation.total_interactions) as u16;
+        // Calculate score (basis points, 0-10000) - use u128 to prevent overflow
+        reputation.reputation_score = ((reputation.positive_feedback as u128 * 10000)
+            / reputation.total_interactions as u128)
+            .min(10000) as u16;
         reputation.last_updated = Clock::get()?.unix_timestamp;
 
         emit!(FeedbackSubmitted {
@@ -227,6 +269,7 @@ pub mod said {
         passed: bool,
         evidence_uri: String,
     ) -> Result<()> {
+        validate_uri(&evidence_uri)?;
         let validation = &mut ctx.accounts.validation_record;
         validation.agent_id = ctx.accounts.agent_identity.key();
         validation.validator = ctx.accounts.validator.key();
@@ -260,6 +303,12 @@ pub enum SaidError {
     Unauthorized,
     #[msg("Wallet is not linked to this identity")]
     WalletNotLinked,
+    #[msg("Cannot submit feedback for your own agent identity")]
+    CannotReviewSelf,
+    #[msg("Feedback context must be 500 characters or less")]
+    ContextTooLong,
+    #[msg("Invalid URI: must be HTTPS/IPFS/Arweave, 10-200 chars")]
+    InvalidMetadataUri,
 }
 
 // ============ ACCOUNTS ============
@@ -278,6 +327,8 @@ pub struct WithdrawFees<'info> {
         address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
     )]
     pub authority: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
