@@ -242,9 +242,9 @@ All repositories work together as a unified identity stack:
 - **[said-website](https://github.com/kaiclawd/said-website)** — Next.js frontend + docs
 - **[create-said-agent](https://github.com/kaiclawd/create-said-agent)** — Agent scaffolding wizard
 
-#### Final Stats (Feb 13, 2026):
-- **Registered agents:** 18 (early adopters, focusing on quality integrations over vanity metrics)
-- **Verified agents:** 2
+#### Stats (Mar 1, 2026):
+- **Registered agents:** 53 (3x growth since hackathon submission)
+- **Verified agents:** 21 (10x growth since hackathon submission)
 - **Live integrations:** Torch Market (bidirectional reputation — their events boost agent scores on SAID)
 - **npm packages:** said-sdk (v0.3.3), create-said-agent (v0.3.10)
 - **Mainnet program:** 5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G
