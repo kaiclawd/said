@@ -1,6 +1,19 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 
+#[cfg(not(feature = "no-entrypoint"))]
+use solana_security_txt::security_txt;
+
+#[cfg(not(feature = "no-entrypoint"))]
+security_txt! {
+    name: "SAID Protocol",
+    project_url: "https://www.saidprotocol.com",
+    contacts: "email:kaiclawd@outlook.com",
+    policy: "https://github.com/kaiclawd/said/blob/main/security.txt",
+    source_code: "https://github.com/kaiclawd/said",
+    auditors: "N/A"
+}
+
 declare_id!("Da5VT4SJerSuwnA1byc8W4uD3wYhwD1c9qKFLtN3sCPR");
 
 // ============ HARDCODED CONSTANTS ============
