@@ -14,7 +14,7 @@ security_txt! {
     auditors: "N/A"
 }
 
-declare_id!("Da5VT4SJerSuwnA1byc8W4uD3wYhwD1c9qKFLtN3sCPR");
+declare_id!("5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G");
 
 // ============ HARDCODED CONSTANTS ============
 // Treasury authority - ONLY this wallet can initialize treasury and withdraw fees
@@ -219,6 +219,51 @@ pub mod said {
             agent_id: agent.key(),
             old_authority,
             new_authority: agent.authority,
+        });
+
+        Ok(())
+    }
+
+    /// Sponsor-register an agent on behalf of another wallet (AUTHORITY ONLY)
+    /// Creates the agent PDA as if the agent_wallet registered themselves.
+    /// The agent_wallet becomes both owner and authority of their identity.
+    /// Only the treasury authority can call this — used for batch onboarding.
+    pub fn sponsor_register(
+        ctx: Context<SponsorRegister>,
+        metadata_uri: String,
+    ) -> Result<()> {
+        validate_uri(&metadata_uri)?;
+
+        let agent = &mut ctx.accounts.agent_identity;
+        agent.owner = ctx.accounts.agent_wallet.key();
+        agent.authority = ctx.accounts.agent_wallet.key();
+        agent.metadata_uri = metadata_uri;
+        agent.created_at = Clock::get()?.unix_timestamp;
+        agent.is_verified = false;
+        agent.bump = ctx.bumps.agent_identity;
+
+        emit!(AgentRegistered {
+            agent_id: agent.key(),
+            owner: agent.owner,
+            metadata_uri: agent.metadata_uri.clone(),
+        });
+
+        Ok(())
+    }
+
+    /// Sponsor-verify an agent (AUTHORITY ONLY, FREE — no verification fee)
+    /// Marks an already-registered agent as verified without requiring their signature.
+    /// Only the treasury authority can call this — used for batch verification.
+    pub fn sponsor_verify(
+        ctx: Context<SponsorVerify>,
+    ) -> Result<()> {
+        let agent = &mut ctx.accounts.agent_identity;
+        agent.is_verified = true;
+        agent.verified_at = Some(Clock::get()?.unix_timestamp);
+
+        emit!(AgentVerified {
+            agent_id: agent.key(),
+            fee_paid: 0, // Sponsored — no fee
         });
 
         Ok(())
@@ -487,6 +532,48 @@ pub struct TransferAuthority<'info> {
     pub wallet_link: Account<'info, WalletLink>,
 
     pub new_authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(metadata_uri: String)]
+pub struct SponsorRegister<'info> {
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + AgentIdentity::INIT_SPACE,
+        seeds = [b"agent", agent_wallet.key().as_ref()],
+        bump
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+
+    /// The wallet that will own this identity (does NOT need to sign)
+    /// CHECK: This is the agent's wallet address used as PDA seed. Not a signer.
+    pub agent_wallet: UncheckedAccount<'info>,
+
+    /// Must be the treasury authority
+    #[account(
+        mut,
+        address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
+    )]
+    pub authority: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SponsorVerify<'info> {
+    #[account(
+        mut,
+        seeds = [b"agent", agent_identity.owner.as_ref()],
+        bump = agent_identity.bump,
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+
+    /// Must be the treasury authority
+    #[account(
+        address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
+    )]
+    pub authority: Signer<'info>,
 }
 
 #[derive(Accounts)]
