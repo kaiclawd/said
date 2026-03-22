@@ -126,21 +126,10 @@ pub mod said {
             SaidError::InsufficientTreasuryBalance
         );
 
-        // Use CPI transfer for atomic operation (prevents partial state)
-        let treasury_seeds = &[b"treasury".as_ref(), &[treasury.bump]];
-        let signer_seeds = &[&treasury_seeds[..]];
-
-        system_program::transfer(
-            CpiContext::new_with_signer(
-                ctx.accounts.system_program.to_account_info(),
-                system_program::Transfer {
-                    from: ctx.accounts.treasury.to_account_info(),
-                    to: ctx.accounts.authority.to_account_info(),
-                },
-                signer_seeds,
-            ),
-            amount,
-        )?;
+        // Direct lamport manipulation — system_program::transfer fails on
+        // accounts that carry data (known Solana limitation for PDAs with data)
+        **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? -= amount;
+        **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += amount;
 
         emit!(FeesWithdrawn {
             authority: ctx.accounts.authority.key(),
