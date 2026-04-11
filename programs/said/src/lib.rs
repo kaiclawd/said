@@ -25,6 +25,10 @@ pub const TREASURY_AUTHORITY: Pubkey = pubkey!("H8nKbwHTTmnjgnsvqxRDpoEcTkU6uoqs
 pub const VERIFICATION_FEE: u64 = 10_000_000; // 0.01 SOL - verified badge
 pub const VALIDATION_FEE: u64 = 1_000_000;    // 0.001 SOL - work validation
 
+// Staking params
+pub const MIN_STAKE_LAMPORTS: u64 = 100_000_000; // 0.1 SOL minimum stake for stake-to-register v1
+pub const UNSTAKE_COOLDOWN_SECS: i64 = 7 * 24 * 60 * 60; // 7 days
+
 // URI validation helper
 fn validate_uri(uri: &str) -> Result<()> {
     require!(
@@ -71,6 +75,11 @@ pub mod said {
         agent.metadata_uri = metadata_uri;
         agent.created_at = Clock::get()?.unix_timestamp;
         agent.is_verified = false;
+        agent.verification_tier = 0; // 0 = unverified, 1 = staked (v1)
+        agent.stake_amount = 0;
+        agent.staked_at = None;
+        agent.slash_count = 0;
+        agent.last_slashed_at = None;
         agent.bump = ctx.bumps.agent_identity;
 
         emit!(AgentRegistered {
@@ -107,6 +116,79 @@ pub mod said {
         emit!(AgentVerified {
             agent_id: agent.key(),
             fee_paid: VERIFICATION_FEE,
+        });
+
+        Ok(())
+    }
+
+    /// Register an agent AND stake in one transaction (stake-to-register v1)
+    /// - Initializes AgentIdentity and AgentStake vault
+    /// - Transfers `stake_lamports` from owner to the stake vault (must be >= MIN_STAKE_LAMPORTS)
+    /// - Marks agent as verified with tier=1
+    pub fn register_and_stake(
+        ctx: Context<RegisterAndStake>,
+        metadata_uri: String,
+        stake_lamports: u64,
+    ) -> Result<()> {
+        // Validate inputs
+        validate_uri(&metadata_uri)?;
+        require!(stake_lamports >= MIN_STAKE_LAMPORTS, SaidError::StakeTooLow);
+
+        // Init identity
+        let now = Clock::get()?.unix_timestamp;
+        let agent = &mut ctx.accounts.agent_identity;
+        agent.owner = ctx.accounts.owner.key();
+        agent.authority = ctx.accounts.owner.key();
+        agent.metadata_uri = metadata_uri;
+        agent.created_at = now;
+        agent.is_verified = true; // stake-to-register grants verified v1
+        agent.verified_at = Some(now);
+        agent.verification_tier = 1; // 1 = staked v1
+        agent.stake_amount = stake_lamports;
+        agent.staked_at = Some(now);
+        agent.slash_count = 0;
+        agent.last_slashed_at = None;
+        agent.bump = ctx.bumps.agent_identity;
+
+        // Initialize stake vault (already created by Anchor), then fund it
+        let stake_vault = &ctx.accounts.agent_stake;
+        let owner = &ctx.accounts.owner;
+
+        // Transfer stake funds into the stake vault PDA
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer {
+                    from: owner.to_account_info(),
+                    to: stake_vault.to_account_info(),
+                },
+            ),
+            stake_lamports,
+        )?;
+
+        // Record stake vault state
+        let stake = &mut ctx.accounts.agent_stake;
+        stake.agent_id = agent.key();
+        stake.amount = stake_lamports;
+        stake.staked_at = now;
+        stake.cooldown_until = None;
+        stake.is_slashed = false;
+        stake.bump = ctx.bumps.agent_stake;
+
+        emit!(StakeDeposited {
+            agent_id: agent.key(),
+            amount: stake_lamports,
+        });
+
+        emit!(AgentRegistered {
+            agent_id: agent.key(),
+            owner: agent.owner,
+            metadata_uri: agent.metadata_uri.clone(),
+        });
+
+        emit!(AgentVerified {
+            agent_id: agent.key(),
+            fee_paid: 0, // verified via stake, no fee path
         });
 
         Ok(())
@@ -229,6 +311,11 @@ pub mod said {
         agent.metadata_uri = metadata_uri;
         agent.created_at = Clock::get()?.unix_timestamp;
         agent.is_verified = false;
+        agent.verification_tier = 0;
+        agent.stake_amount = 0;
+        agent.staked_at = None;
+        agent.slash_count = 0;
+        agent.last_slashed_at = None;
         agent.bump = ctx.bumps.agent_identity;
 
         emit!(AgentRegistered {
@@ -336,6 +423,115 @@ pub mod said {
 
         Ok(())
     }
+
+    /// Request to begin unstaking (starts 7-day cooldown)
+    pub fn request_unstake(ctx: Context<RequestUnstake>) -> Result<()> {
+        // Only authority can request
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority,
+            SaidError::Unauthorized
+        );
+
+        let stake = &mut ctx.accounts.agent_stake;
+        require!(stake.amount > 0, SaidError::NoActiveStake);
+        require!(stake.cooldown_until.is_none(), SaidError::AlreadyUnstaking);
+        require!(!stake.is_slashed, SaidError::StakeSlashed);
+
+        let now = Clock::get()?.unix_timestamp;
+        stake.cooldown_until = Some(now + UNSTAKE_COOLDOWN_SECS);
+
+        emit!(UnstakeRequested {
+            agent_id: stake.agent_id,
+            available_at: stake.cooldown_until.unwrap(),
+        });
+
+        Ok(())
+    }
+
+    /// Complete unstake after cooldown; returns stake to authority signer and downgrades verification
+    pub fn complete_unstake(ctx: Context<CompleteUnstake>) -> Result<()> {
+        // Only authority can complete
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority,
+            SaidError::Unauthorized
+        );
+
+        let now = Clock::get()?.unix_timestamp;
+        let stake = &mut ctx.accounts.agent_stake;
+        let amount = stake.amount;
+        require!(amount > 0, SaidError::NoActiveStake);
+        require!(stake.cooldown_until.is_some(), SaidError::UnstakeNotRequested);
+        require!(now >= stake.cooldown_until.unwrap(), SaidError::CooldownNotComplete);
+
+        // Return lamports to authority
+        **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= amount;
+        **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += amount;
+
+        // Zero out stake and downgrade verification
+        stake.amount = 0;
+        stake.cooldown_until = None;
+
+        let agent = &mut ctx.accounts.agent_identity;
+        agent.verification_tier = 0;
+        agent.is_verified = false; // v1 behavior: verified status comes from stake
+        agent.stake_amount = 0;
+        agent.staked_at = None;
+
+        emit!(Unstaked {
+            agent_id: agent.key(),
+            amount,
+        });
+
+        Ok(())
+    }
+
+    /// Admin-only slashing (V1) — burns a percentage of stake and downgrades verification
+    pub fn slash_agent(ctx: Context<SlashAgent>, severity_bps: u16) -> Result<()> {
+        // Only hardcoded treasury authority may slash in V1
+        require!(
+            ctx.accounts.admin.key() == TREASURY_AUTHORITY,
+            SaidError::UnauthorizedAuthority
+        );
+
+        // Cap severity at 10000 bps (100%)
+        require!(severity_bps <= 10_000, SaidError::InvalidSeverity);
+
+        let stake = &mut ctx.accounts.agent_stake;
+        let agent = &mut ctx.accounts.agent_identity;
+        require!(stake.amount > 0, SaidError::NoActiveStake);
+
+        // Compute slash amount
+        let slash_amount = (stake.amount as u128 * severity_bps as u128 / 10_000) as u64;
+        require!(slash_amount > 0, SaidError::NothingToSlash);
+
+        // Transfer slashed lamports to treasury (acts as a burn sink in V1)
+        **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= slash_amount;
+        **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? += slash_amount;
+
+        // Update state
+        stake.amount = stake.amount.saturating_sub(slash_amount);
+        stake.is_slashed = true; // mark slashed until restaked
+        agent.slash_count = agent.slash_count.saturating_add(1);
+        agent.last_slashed_at = Some(Clock::get()?.unix_timestamp);
+
+        // If all stake gone, downgrade verification
+        if stake.amount == 0 {
+            agent.is_verified = false;
+            agent.verification_tier = 0;
+            agent.stake_amount = 0;
+            agent.staked_at = None;
+        } else {
+            agent.stake_amount = stake.amount;
+        }
+
+        emit!(AgentSlashed {
+            agent_id: agent.key(),
+            amount: slash_amount,
+            severity_bps,
+        });
+
+        Ok(())
+    }
 }
 
 // ============ ERRORS ============
@@ -356,6 +552,22 @@ pub enum SaidError {
     ContextTooLong,
     #[msg("Invalid URI: must be HTTPS/IPFS/Arweave, 10-200 chars")]
     InvalidMetadataUri,
+    #[msg("Stake too low for stake-to-register v1")]
+    StakeTooLow,
+    #[msg("No active stake for this agent")]
+    NoActiveStake,
+    #[msg("Unstake already requested")]
+    AlreadyUnstaking,
+    #[msg("Unstake not requested")]
+    UnstakeNotRequested,
+    #[msg("Unstake cooldown not complete")]
+    CooldownNotComplete,
+    #[msg("Stake already slashed")]
+    StakeSlashed,
+    #[msg("Invalid severity basis points")]
+    InvalidSeverity,
+    #[msg("Nothing to slash")]
+    NothingToSlash,
 }
 
 // ============ ACCOUNTS ============
@@ -409,6 +621,33 @@ pub struct RegisterAgent<'info> {
         bump
     )]
     pub agent_identity: Account<'info, AgentIdentity>,
+
+    #[account(mut)]
+    pub owner: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(metadata_uri: String)]
+pub struct RegisterAndStake<'info> {
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + AgentIdentity::INIT_SPACE,
+        seeds = [b"agent", owner.key().as_ref()],
+        bump
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+
+    #[account(
+        init,
+        payer = owner,
+        space = 8 + AgentStake::INIT_SPACE,
+        seeds = [b"stake", agent_identity.key().as_ref()],
+        bump
+    )]
+    pub agent_stake: Account<'info, AgentStake>,
 
     #[account(mut)]
     pub owner: Signer<'info>,
@@ -612,6 +851,80 @@ pub struct ValidateWork<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+pub struct RequestUnstake<'info> {
+    #[account(
+        mut,
+        seeds = [b"agent", agent_identity.owner.as_ref()],
+        bump = agent_identity.bump,
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+
+    #[account(
+        mut,
+        seeds = [b"stake", agent_identity.key().as_ref()],
+        bump = agent_stake.bump,
+        constraint = agent_stake.agent_id == agent_identity.key()
+    )]
+    pub agent_stake: Account<'info, AgentStake>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct CompleteUnstake<'info> {
+    #[account(
+        mut,
+        seeds = [b"agent", agent_identity.owner.as_ref()],
+        bump = agent_identity.bump,
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+
+    #[account(
+        mut,
+        seeds = [b"stake", agent_identity.key().as_ref()],
+        bump = agent_stake.bump,
+        constraint = agent_stake.agent_id == agent_identity.key()
+    )]
+    pub agent_stake: Account<'info, AgentStake>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct SlashAgent<'info> {
+    #[account(
+        mut,
+        seeds = [b"agent", agent_identity.owner.as_ref()],
+        bump = agent_identity.bump,
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+
+    #[account(
+        mut,
+        seeds = [b"stake", agent_identity.key().as_ref()],
+        bump = agent_stake.bump,
+        constraint = agent_stake.agent_id == agent_identity.key()
+    )]
+    pub agent_stake: Account<'info, AgentStake>,
+
+    #[account(
+        mut,
+        seeds = [b"treasury"],
+        bump = treasury.bump
+    )]
+    pub treasury: Account<'info, Treasury>,
+
+    /// Hardcoded treasury authority must sign (admin-only V1)
+    #[account(
+        mut,
+        address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
+    )]
+    pub admin: Signer<'info>,
+}
+
 // ============ STATE ============
 
 #[account]
@@ -632,6 +945,12 @@ pub struct AgentIdentity {
     pub created_at: i64,
     pub is_verified: bool,
     pub verified_at: Option<i64>,
+    // Staking & trust fields (v1)
+    pub verification_tier: u8,   // 0 = none, 1 = staked v1
+    pub stake_amount: u64,       // current stake amount (lamports)
+    pub staked_at: Option<i64>,
+    pub slash_count: u32,
+    pub last_slashed_at: Option<i64>,
     pub bump: u8,
 }
 
@@ -665,6 +984,17 @@ pub struct ValidationRecord {
     #[max_len(200)]
     pub evidence_uri: String,
     pub timestamp: i64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct AgentStake {
+    pub agent_id: Pubkey,   // links to AgentIdentity key()
+    pub amount: u64,        // current staked lamports
+    pub staked_at: i64,
+    pub cooldown_until: Option<i64>, // when unstake can complete
+    pub is_slashed: bool,
     pub bump: u8,
 }
 
@@ -732,4 +1062,29 @@ pub struct WorkValidated {
 pub struct FeesWithdrawn {
     pub authority: Pubkey,
     pub amount: u64,
+}
+
+#[event]
+pub struct StakeDeposited {
+    pub agent_id: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct UnstakeRequested {
+    pub agent_id: Pubkey,
+    pub available_at: i64,
+}
+
+#[event]
+pub struct Unstaked {
+    pub agent_id: Pubkey,
+    pub amount: u64,
+}
+
+#[event]
+pub struct AgentSlashed {
+    pub agent_id: Pubkey,
+    pub amount: u64,
+    pub severity_bps: u16,
 }
