@@ -28,6 +28,7 @@ pub const VALIDATION_FEE: u64 = 1_000_000;    // 0.001 SOL - work validation
 // Staking params
 pub const MIN_STAKE_LAMPORTS: u64 = 100_000_000; // 0.1 SOL minimum stake for stake-to-register v1
 pub const UNSTAKE_COOLDOWN_SECS: i64 = 7 * 24 * 60 * 60; // 7 days
+pub const EMERGENCY_UNSTAKE_PENALTY_BPS: u16 = 1000; // 10%
 
 // URI validation helper
 fn validate_uri(uri: &str) -> Result<()> {
@@ -62,8 +63,6 @@ pub mod said {
     }
 
     /// Register a new AI agent identity (FREE)
-    /// The registering wallet becomes both the permanent owner (PDA seed)
-    /// and the initial authority (admin). Authority can be transferred later.
     pub fn register_agent(
         ctx: Context<RegisterAgent>,
         metadata_uri: String,
@@ -71,11 +70,11 @@ pub mod said {
         validate_uri(&metadata_uri)?;
         let agent = &mut ctx.accounts.agent_identity;
         agent.owner = ctx.accounts.owner.key();
-        agent.authority = ctx.accounts.owner.key(); // authority starts as owner
+        agent.authority = ctx.accounts.owner.key();
         agent.metadata_uri = metadata_uri;
         agent.created_at = Clock::get()?.unix_timestamp;
         agent.is_verified = false;
-        agent.verification_tier = 0; // 0 = unverified, 1 = staked (v1)
+        agent.verification_tier = 0;
         agent.stake_amount = 0;
         agent.staked_at = None;
         agent.slash_count = 0;
@@ -92,9 +91,7 @@ pub mod said {
     }
 
     /// Get verified badge (PAID - 0.01 SOL)
-    /// Can be called by the current authority (not just the original owner)
     pub fn get_verified(ctx: Context<GetVerified>) -> Result<()> {
-        // Transfer verification fee to treasury
         system_program::transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -121,40 +118,32 @@ pub mod said {
         Ok(())
     }
 
-    /// Register an agent AND stake in one transaction (stake-to-register v1)
-    /// - Initializes AgentIdentity and AgentStake vault
-    /// - Transfers `stake_lamports` from owner to the stake vault (must be >= MIN_STAKE_LAMPORTS)
-    /// - Marks agent as verified with tier=1
+    /// Register + Stake (v1)
     pub fn register_and_stake(
         ctx: Context<RegisterAndStake>,
         metadata_uri: String,
         stake_lamports: u64,
     ) -> Result<()> {
-        // Validate inputs
         validate_uri(&metadata_uri)?;
         require!(stake_lamports >= MIN_STAKE_LAMPORTS, SaidError::StakeTooLow);
 
-        // Init identity
         let now = Clock::get()?.unix_timestamp;
         let agent = &mut ctx.accounts.agent_identity;
         agent.owner = ctx.accounts.owner.key();
         agent.authority = ctx.accounts.owner.key();
         agent.metadata_uri = metadata_uri;
         agent.created_at = now;
-        agent.is_verified = true; // stake-to-register grants verified v1
+        agent.is_verified = true;
         agent.verified_at = Some(now);
-        agent.verification_tier = 1; // 1 = staked v1
+        agent.verification_tier = 1;
         agent.stake_amount = stake_lamports;
         agent.staked_at = Some(now);
         agent.slash_count = 0;
         agent.last_slashed_at = None;
         agent.bump = ctx.bumps.agent_identity;
 
-        // Initialize stake vault (already created by Anchor), then fund it
         let stake_vault = &ctx.accounts.agent_stake;
         let owner = &ctx.accounts.owner;
-
-        // Transfer stake funds into the stake vault PDA
         system_program::transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -166,7 +155,6 @@ pub mod said {
             stake_lamports,
         )?;
 
-        // Record stake vault state
         let stake = &mut ctx.accounts.agent_stake;
         stake.agent_id = agent.key();
         stake.amount = stake_lamports;
@@ -175,22 +163,9 @@ pub mod said {
         stake.is_slashed = false;
         stake.bump = ctx.bumps.agent_stake;
 
-        emit!(StakeDeposited {
-            agent_id: agent.key(),
-            amount: stake_lamports,
-        });
-
-        emit!(AgentRegistered {
-            agent_id: agent.key(),
-            owner: agent.owner,
-            metadata_uri: agent.metadata_uri.clone(),
-        });
-
-        emit!(AgentVerified {
-            agent_id: agent.key(),
-            fee_paid: 0, // verified via stake, no fee path
-        });
-
+        emit!(StakeDeposited { agent_id: agent.key(), amount: stake_lamports });
+        emit!(AgentRegistered { agent_id: agent.key(), owner: agent.owner, metadata_uri: agent.metadata_uri.clone() });
+        emit!(AgentVerified { agent_id: agent.key(), fee_paid: 0 });
         Ok(())
     }
 
@@ -198,26 +173,15 @@ pub mod said {
     pub fn withdraw_fees(ctx: Context<WithdrawFees>, amount: u64) -> Result<()> {
         let treasury = &ctx.accounts.treasury;
         let treasury_lamports = treasury.to_account_info().lamports();
-
-        // Keep minimum rent in treasury
         let rent = Rent::get()?;
         let min_balance = rent.minimum_balance(8 + Treasury::INIT_SPACE);
-
         require!(
             treasury_lamports.saturating_sub(amount) >= min_balance,
             SaidError::InsufficientTreasuryBalance
         );
-
-        // Direct lamport manipulation — system_program::transfer fails on
-        // accounts that carry data (known Solana limitation for PDAs with data)
         **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? -= amount;
         **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += amount;
-
-        emit!(FeesWithdrawn {
-            authority: ctx.accounts.authority.key(),
-            amount,
-        });
-
+        emit!(FeesWithdrawn { authority: ctx.accounts.authority.key(), amount });
         Ok(())
     }
 
@@ -229,82 +193,41 @@ pub mod said {
         validate_uri(&new_metadata_uri)?;
         let agent = &mut ctx.accounts.agent_identity;
         agent.metadata_uri = new_metadata_uri.clone();
-
-        emit!(AgentUpdated {
-            agent_id: agent.key(),
-            new_metadata_uri,
-        });
-
+        emit!(AgentUpdated { agent_id: agent.key(), new_metadata_uri });
         Ok(())
     }
 
-    /// Link a wallet to this identity
-    ///
-    /// Both the current authority AND the new wallet must sign,
-    /// proving control of both. Creates a WalletLink PDA that
-    /// maps the new wallet back to this identity.
-    ///
-    /// One person, many wallets. Each resolves to the same identity.
     pub fn link_wallet(ctx: Context<LinkWallet>) -> Result<()> {
         let wallet_link = &mut ctx.accounts.wallet_link;
         wallet_link.agent_id = ctx.accounts.agent_identity.key();
         wallet_link.wallet = ctx.accounts.new_wallet.key();
         wallet_link.bump = ctx.bumps.wallet_link;
-
-        emit!(WalletLinked {
-            agent_id: ctx.accounts.agent_identity.key(),
-            wallet: ctx.accounts.new_wallet.key(),
-            linked_by: ctx.accounts.authority.key(),
-        });
-
+        emit!(WalletLinked { agent_id: ctx.accounts.agent_identity.key(), wallet: ctx.accounts.new_wallet.key(), linked_by: ctx.accounts.authority.key() });
         Ok(())
     }
 
-    /// Unlink a wallet from this identity
-    ///
-    /// Can be called by the authority (remove any linked wallet)
-    /// or by the linked wallet itself (remove yourself).
-    /// Closes the WalletLink PDA and returns rent to the signer.
     pub fn unlink_wallet(ctx: Context<UnlinkWallet>) -> Result<()> {
         emit!(WalletUnlinked {
             agent_id: ctx.accounts.agent_identity.key(),
             wallet: ctx.accounts.wallet_link.wallet,
             unlinked_by: ctx.accounts.caller.key(),
         });
-
-        // Account closure handled by Anchor's `close` constraint
         Ok(())
     }
 
-    /// Transfer authority to a linked wallet
-    ///
-    /// Recovery mechanism: if the primary owner loses their wallet,
-    /// any linked wallet can call this to become the new authority.
-    /// The identity PDA address never changes -- only the admin rotates.
     pub fn transfer_authority(ctx: Context<TransferAuthority>) -> Result<()> {
         let old_authority = ctx.accounts.agent_identity.authority;
         let agent = &mut ctx.accounts.agent_identity;
         agent.authority = ctx.accounts.new_authority.key();
-
-        emit!(AuthorityTransferred {
-            agent_id: agent.key(),
-            old_authority,
-            new_authority: agent.authority,
-        });
-
+        emit!(AuthorityTransferred { agent_id: agent.key(), old_authority, new_authority: agent.authority });
         Ok(())
     }
 
-    /// Sponsor-register an agent on behalf of another wallet (AUTHORITY ONLY)
-    /// Creates the agent PDA as if the agent_wallet registered themselves.
-    /// The agent_wallet becomes both owner and authority of their identity.
-    /// Only the treasury authority can call this — used for batch onboarding.
     pub fn sponsor_register(
         ctx: Context<SponsorRegister>,
         metadata_uri: String,
     ) -> Result<()> {
         validate_uri(&metadata_uri)?;
-
         let agent = &mut ctx.accounts.agent_identity;
         agent.owner = ctx.accounts.agent_wallet.key();
         agent.authority = ctx.accounts.agent_wallet.key();
@@ -317,86 +240,44 @@ pub mod said {
         agent.slash_count = 0;
         agent.last_slashed_at = None;
         agent.bump = ctx.bumps.agent_identity;
-
-        emit!(AgentRegistered {
-            agent_id: agent.key(),
-            owner: agent.owner,
-            metadata_uri: agent.metadata_uri.clone(),
-        });
-
+        emit!(AgentRegistered { agent_id: agent.key(), owner: agent.owner, metadata_uri: agent.metadata_uri.clone() });
         Ok(())
     }
 
-    /// Sponsor-verify an agent (AUTHORITY ONLY, FREE — no verification fee)
-    /// Marks an already-registered agent as verified without requiring their signature.
-    /// Only the treasury authority can call this — used for batch verification.
-    pub fn sponsor_verify(
-        ctx: Context<SponsorVerify>,
-    ) -> Result<()> {
+    pub fn sponsor_verify(ctx: Context<SponsorVerify>) -> Result<()> {
         let agent = &mut ctx.accounts.agent_identity;
         agent.is_verified = true;
         agent.verified_at = Some(Clock::get()?.unix_timestamp);
-
-        emit!(AgentVerified {
-            agent_id: agent.key(),
-            fee_paid: 0, // Sponsored — no fee
-        });
-
+        emit!(AgentVerified { agent_id: agent.key(), fee_paid: 0 });
         Ok(())
     }
 
-    /// Submit feedback for an agent (affects reputation)
     pub fn submit_feedback(
         ctx: Context<SubmitFeedback>,
         positive: bool,
         context: String,
     ) -> Result<()> {
-        // Prevent self-voting
         require!(
             ctx.accounts.reviewer.key() != ctx.accounts.agent_identity.owner
                 && ctx.accounts.reviewer.key() != ctx.accounts.agent_identity.authority,
             SaidError::CannotReviewSelf
         );
-
-        // Limit context length
-        require!(
-            context.len() <= 500,
-            SaidError::ContextTooLong
-        );
-
+        require!(context.len() <= 500, SaidError::ContextTooLong);
         let reputation = &mut ctx.accounts.agent_reputation;
-
-        // Initialize if first feedback
         if reputation.total_interactions == 0 {
             reputation.agent_id = ctx.accounts.agent_identity.key();
             reputation.bump = ctx.bumps.agent_reputation;
         }
-
         reputation.total_interactions += 1;
-        if positive {
-            reputation.positive_feedback += 1;
-        } else {
-            reputation.negative_feedback += 1;
-        }
-
-        // Calculate score (basis points, 0-10000) - use u128 to prevent overflow
+        if positive { reputation.positive_feedback += 1; } else { reputation.negative_feedback += 1; }
         reputation.reputation_score = ((reputation.positive_feedback as u128 * 10000)
             / reputation.total_interactions as u128)
             .min(10000) as u16;
         reputation.last_updated = Clock::get()?.unix_timestamp;
-
-        emit!(FeedbackSubmitted {
-            agent_id: reputation.agent_id,
-            from: ctx.accounts.reviewer.key(),
-            positive,
-            context,
-            new_score: reputation.reputation_score,
-        });
-
+        emit!(FeedbackSubmitted { agent_id: reputation.agent_id, from: ctx.accounts.reviewer.key(), positive, context, new_score: reputation.reputation_score });
         Ok(())
     }
 
-    /// Validate agent work (third-party attestation)
     pub fn validate_work(
         ctx: Context<ValidateWork>,
         task_hash: [u8; 32],
@@ -412,109 +293,96 @@ pub mod said {
         validation.evidence_uri = evidence_uri.clone();
         validation.timestamp = Clock::get()?.unix_timestamp;
         validation.bump = ctx.bumps.validation_record;
-
-        emit!(WorkValidated {
-            agent_id: validation.agent_id,
-            validator: validation.validator,
-            task_hash,
-            passed,
-            evidence_uri,
-        });
-
+        emit!(WorkValidated { agent_id: validation.agent_id, validator: validation.validator, task_hash, passed, evidence_uri });
         Ok(())
     }
 
-    /// Request to begin unstaking (starts 7-day cooldown)
     pub fn request_unstake(ctx: Context<RequestUnstake>) -> Result<()> {
-        // Only authority can request
         require!(
             ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority,
             SaidError::Unauthorized
         );
-
         let stake = &mut ctx.accounts.agent_stake;
         require!(stake.amount > 0, SaidError::NoActiveStake);
         require!(stake.cooldown_until.is_none(), SaidError::AlreadyUnstaking);
         require!(!stake.is_slashed, SaidError::StakeSlashed);
-
         let now = Clock::get()?.unix_timestamp;
         stake.cooldown_until = Some(now + UNSTAKE_COOLDOWN_SECS);
-
-        emit!(UnstakeRequested {
-            agent_id: stake.agent_id,
-            available_at: stake.cooldown_until.unwrap(),
-        });
-
+        emit!(UnstakeRequested { agent_id: stake.agent_id, available_at: stake.cooldown_until.unwrap() });
         Ok(())
     }
 
-    /// Complete unstake after cooldown; returns stake to authority signer and downgrades verification
     pub fn complete_unstake(ctx: Context<CompleteUnstake>) -> Result<()> {
-        // Only authority can complete
         require!(
             ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority,
             SaidError::Unauthorized
         );
-
         let now = Clock::get()?.unix_timestamp;
         let stake = &mut ctx.accounts.agent_stake;
         let amount = stake.amount;
         require!(amount > 0, SaidError::NoActiveStake);
         require!(stake.cooldown_until.is_some(), SaidError::UnstakeNotRequested);
         require!(now >= stake.cooldown_until.unwrap(), SaidError::CooldownNotComplete);
-
-        // Return lamports to authority
         **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= amount;
         **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += amount;
-
-        // Zero out stake and downgrade verification
         stake.amount = 0;
         stake.cooldown_until = None;
-
         let agent = &mut ctx.accounts.agent_identity;
         agent.verification_tier = 0;
-        agent.is_verified = false; // v1 behavior: verified status comes from stake
+        agent.is_verified = false;
         agent.stake_amount = 0;
         agent.staked_at = None;
-
-        emit!(Unstaked {
-            agent_id: agent.key(),
-            amount,
-        });
-
+        emit!(Unstaked { agent_id: agent.key(), amount });
         Ok(())
     }
 
-    /// Admin-only slashing (V1) — burns a percentage of stake and downgrades verification
+    /// Emergency unstake with penalty (immediate withdrawal, 10% burned to treasury)
+    pub fn emergency_unstake(ctx: Context<EmergencyUnstake>) -> Result<()> {
+        // Only authority can initiate
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority,
+            SaidError::Unauthorized
+        );
+        let stake = &mut ctx.accounts.agent_stake;
+        let amount = stake.amount;
+        require!(amount > 0, SaidError::NoActiveStake);
+        let penalty = (amount as u128 * EMERGENCY_UNSTAKE_PENALTY_BPS as u128 / 10_000) as u64;
+        let payout = amount.saturating_sub(penalty);
+        // Transfer penalty to treasury
+        **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= penalty;
+        **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? += penalty;
+        // Transfer payout to authority immediately
+        **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= payout;
+        **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += payout;
+        // Zero out stake and downgrade
+        stake.amount = 0;
+        stake.cooldown_until = None;
+        let agent = &mut ctx.accounts.agent_identity;
+        agent.verification_tier = 0;
+        agent.is_verified = false;
+        agent.stake_amount = 0;
+        agent.staked_at = None;
+        emit!(EmergencyUnstaked { agent_id: agent.key(), payout, penalty });
+        Ok(())
+    }
+
     pub fn slash_agent(ctx: Context<SlashAgent>, severity_bps: u16) -> Result<()> {
-        // Only hardcoded treasury authority may slash in V1
         require!(
             ctx.accounts.admin.key() == TREASURY_AUTHORITY,
             SaidError::UnauthorizedAuthority
         );
-
-        // Cap severity at 10000 bps (100%)
         require!(severity_bps <= 10_000, SaidError::InvalidSeverity);
-
         let stake = &mut ctx.accounts.agent_stake;
         let agent = &mut ctx.accounts.agent_identity;
         require!(stake.amount > 0, SaidError::NoActiveStake);
-
-        // Compute slash amount
         let slash_amount = (stake.amount as u128 * severity_bps as u128 / 10_000) as u64;
         require!(slash_amount > 0, SaidError::NothingToSlash);
-
-        // Transfer slashed lamports to treasury (acts as a burn sink in V1)
         **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= slash_amount;
         **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? += slash_amount;
-
-        // Update state
         stake.amount = stake.amount.saturating_sub(slash_amount);
-        stake.is_slashed = true; // mark slashed until restaked
+        stake.is_slashed = true;
         agent.slash_count = agent.slash_count.saturating_add(1);
         agent.last_slashed_at = Some(Clock::get()?.unix_timestamp);
-
-        // If all stake gone, downgrade verification
         if stake.amount == 0 {
             agent.is_verified = false;
             agent.verification_tier = 0;
@@ -523,13 +391,7 @@ pub mod said {
         } else {
             agent.stake_amount = stake.amount;
         }
-
-        emit!(AgentSlashed {
-            agent_id: agent.key(),
-            amount: slash_amount,
-            severity_bps,
-        });
-
+        emit!(AgentSlashed { agent_id: agent.key(), amount: slash_amount, severity_bps });
         Ok(())
     }
 }
@@ -774,11 +636,9 @@ pub struct SponsorRegister<'info> {
     )]
     pub agent_identity: Account<'info, AgentIdentity>,
 
-    /// The wallet that will own this identity (does NOT need to sign)
-    /// CHECK: This is the agent's wallet address used as PDA seed. Not a signer.
+    /// CHECK: PDA seed only (not a signer)
     pub agent_wallet: UncheckedAccount<'info>,
 
-    /// Must be the treasury authority
     #[account(
         mut,
         address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
@@ -797,7 +657,6 @@ pub struct SponsorVerify<'info> {
     )]
     pub agent_identity: Account<'info, AgentIdentity>,
 
-    /// Must be the treasury authority
     #[account(
         address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
     )]
@@ -894,6 +753,34 @@ pub struct CompleteUnstake<'info> {
 }
 
 #[derive(Accounts)]
+pub struct EmergencyUnstake<'info> {
+    #[account(
+        mut,
+        seeds = [b"agent", agent_identity.owner.as_ref()],
+        bump = agent_identity.bump,
+    )]
+    pub agent_identity: Account<'info, AgentIdentity>,
+
+    #[account(
+        mut,
+        seeds = [b"stake", agent_identity.key().as_ref()],
+        bump = agent_stake.bump,
+        constraint = agent_stake.agent_id == agent_identity.key()
+    )]
+    pub agent_stake: Account<'info, AgentStake>,
+
+    #[account(
+        mut,
+        seeds = [b"treasury"],
+        bump = treasury.bump
+    )]
+    pub treasury: Account<'info, Treasury>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct SlashAgent<'info> {
     #[account(
         mut,
@@ -917,7 +804,6 @@ pub struct SlashAgent<'info> {
     )]
     pub treasury: Account<'info, Treasury>,
 
-    /// Hardcoded treasury authority must sign (admin-only V1)
     #[account(
         mut,
         address = TREASURY_AUTHORITY @ SaidError::UnauthorizedAuthority
@@ -938,16 +824,15 @@ pub struct Treasury {
 #[account]
 #[derive(InitSpace)]
 pub struct AgentIdentity {
-    pub owner: Pubkey,         // permanent -- used in PDA seeds, never changes
-    pub authority: Pubkey,     // current admin -- can be transferred to a linked wallet
+    pub owner: Pubkey,
+    pub authority: Pubkey,
     #[max_len(200)]
     pub metadata_uri: String,
     pub created_at: i64,
     pub is_verified: bool,
     pub verified_at: Option<i64>,
-    // Staking & trust fields (v1)
-    pub verification_tier: u8,   // 0 = none, 1 = staked v1
-    pub stake_amount: u64,       // current stake amount (lamports)
+    pub verification_tier: u8,
+    pub stake_amount: u64,
     pub staked_at: Option<i64>,
     pub slash_count: u32,
     pub last_slashed_at: Option<i64>,
@@ -957,8 +842,8 @@ pub struct AgentIdentity {
 #[account]
 #[derive(InitSpace)]
 pub struct WalletLink {
-    pub agent_id: Pubkey,      // points back to AgentIdentity PDA
-    pub wallet: Pubkey,        // the linked wallet (used in PDA seeds)
+    pub agent_id: Pubkey,
+    pub wallet: Pubkey,
     pub bump: u8,
 }
 
@@ -969,7 +854,7 @@ pub struct AgentReputation {
     pub total_interactions: u64,
     pub positive_feedback: u64,
     pub negative_feedback: u64,
-    pub reputation_score: u16,  // 0-10000 basis points
+    pub reputation_score: u16,
     pub last_updated: i64,
     pub bump: u8,
 }
@@ -990,10 +875,10 @@ pub struct ValidationRecord {
 #[account]
 #[derive(InitSpace)]
 pub struct AgentStake {
-    pub agent_id: Pubkey,   // links to AgentIdentity key()
-    pub amount: u64,        // current staked lamports
+    pub agent_id: Pubkey,
+    pub amount: u64,
     pub staked_at: i64,
-    pub cooldown_until: Option<i64>, // when unstake can complete
+    pub cooldown_until: Option<i64>,
     pub is_slashed: bool,
     pub bump: u8,
 }
@@ -1001,90 +886,30 @@ pub struct AgentStake {
 // ============ EVENTS ============
 
 #[event]
-pub struct AgentRegistered {
-    pub agent_id: Pubkey,
-    pub owner: Pubkey,
-    pub metadata_uri: String,
-}
-
+pub struct AgentRegistered { pub agent_id: Pubkey, pub owner: Pubkey, pub metadata_uri: String }
 #[event]
-pub struct AgentVerified {
-    pub agent_id: Pubkey,
-    pub fee_paid: u64,
-}
-
+pub struct AgentVerified { pub agent_id: Pubkey, pub fee_paid: u64 }
 #[event]
-pub struct AgentUpdated {
-    pub agent_id: Pubkey,
-    pub new_metadata_uri: String,
-}
-
+pub struct AgentUpdated { pub agent_id: Pubkey, pub new_metadata_uri: String }
 #[event]
-pub struct WalletLinked {
-    pub agent_id: Pubkey,
-    pub wallet: Pubkey,
-    pub linked_by: Pubkey,
-}
-
+pub struct WalletLinked { pub agent_id: Pubkey, pub wallet: Pubkey, pub linked_by: Pubkey }
 #[event]
-pub struct WalletUnlinked {
-    pub agent_id: Pubkey,
-    pub wallet: Pubkey,
-    pub unlinked_by: Pubkey,
-}
-
+pub struct WalletUnlinked { pub agent_id: Pubkey, pub wallet: Pubkey, pub unlinked_by: Pubkey }
 #[event]
-pub struct AuthorityTransferred {
-    pub agent_id: Pubkey,
-    pub old_authority: Pubkey,
-    pub new_authority: Pubkey,
-}
-
+pub struct AuthorityTransferred { pub agent_id: Pubkey, pub old_authority: Pubkey, pub new_authority: Pubkey }
 #[event]
-pub struct FeedbackSubmitted {
-    pub agent_id: Pubkey,
-    pub from: Pubkey,
-    pub positive: bool,
-    pub context: String,
-    pub new_score: u16,
-}
-
+pub struct FeedbackSubmitted { pub agent_id: Pubkey, pub from: Pubkey, pub positive: bool, pub context: String, pub new_score: u16 }
 #[event]
-pub struct WorkValidated {
-    pub agent_id: Pubkey,
-    pub validator: Pubkey,
-    pub task_hash: [u8; 32],
-    pub passed: bool,
-    pub evidence_uri: String,
-}
-
+pub struct WorkValidated { pub agent_id: Pubkey, pub validator: Pubkey, pub task_hash: [u8; 32], pub passed: bool, pub evidence_uri: String }
 #[event]
-pub struct FeesWithdrawn {
-    pub authority: Pubkey,
-    pub amount: u64,
-}
-
+pub struct FeesWithdrawn { pub authority: Pubkey, pub amount: u64 }
 #[event]
-pub struct StakeDeposited {
-    pub agent_id: Pubkey,
-    pub amount: u64,
-}
-
+pub struct StakeDeposited { pub agent_id: Pubkey, pub amount: u64 }
 #[event]
-pub struct UnstakeRequested {
-    pub agent_id: Pubkey,
-    pub available_at: i64,
-}
-
+pub struct UnstakeRequested { pub agent_id: Pubkey, pub available_at: i64 }
 #[event]
-pub struct Unstaked {
-    pub agent_id: Pubkey,
-    pub amount: u64,
-}
-
+pub struct Unstaked { pub agent_id: Pubkey, pub amount: u64 }
 #[event]
-pub struct AgentSlashed {
-    pub agent_id: Pubkey,
-    pub amount: u64,
-    pub severity_bps: u16,
-}
+pub struct EmergencyUnstaked { pub agent_id: Pubkey, pub payout: u64, pub penalty: u64 }
+#[event]
+pub struct AgentSlashed { pub agent_id: Pubkey, pub amount: u64, pub severity_bps: u16 }
