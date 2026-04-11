@@ -1,0 +1,31 @@
+name: Anchor Build (CI)
+
+on:
+  push:
+    branches: [ stake-v1 ]
+  pull_request:
+    branches: [ stake-v1 ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          components: rustfmt, clippy
+      - name: Install Anchor CLI 0.32.1
+        run: |
+          cargo install --locked anchor-cli --version 0.32.1
+      - name: Install cargo-build-sbf
+        run: |
+          cargo install cargo-build-sbf --locked
+      - name: Build
+        env:
+          PATH: ${{ env.HOME }}/.cargo/bin:${{ env.PATH }}
+        run: |
+          anchor --version
+          anchor build
