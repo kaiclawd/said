@@ -14,7 +14,7 @@ security_txt! {
     auditors: "N/A"
 }
 
-declare_id!("5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G");
+declare_id!("ESPreFucjVwtDmZbhtL3JLJ9VxCethNEYtosMQhkcurv");
 
 // ============ HARDCODED CONSTANTS ============
 pub const TREASURY_AUTHORITY: Pubkey = pubkey!("H8nKbwHTTmnjgnsvqxRDpoEcTkU6uoqs4DcLm4kY55Wp");
@@ -226,6 +226,64 @@ pub mod said {
         Ok(())
     }
 
+    /// Stake for an already-registered agent (creates AgentStake, upgrades to tier 2)
+    pub fn stake(ctx: Context<Stake>, stake_lamports: u64) -> Result<()> {
+        require!(stake_lamports >= MIN_STAKE_LAMPORTS, SaidError::StakeTooLow);
+        let now = Clock::get()?.unix_timestamp;
+        let agent = &mut ctx.accounts.agent_identity;
+        require!(agent.is_verified, SaidError::NotVerified);
+        require!(agent.stake_amount == 0, SaidError::AlreadyStaked);
+        
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer { from: ctx.accounts.authority.to_account_info(), to: ctx.accounts.agent_stake.to_account_info() },
+            ),
+            stake_lamports,
+        )?;
+        
+        let stake = &mut ctx.accounts.agent_stake;
+        stake.agent_id = agent.key();
+        stake.amount = stake_lamports;
+        stake.staked_at = now;
+        stake.cooldown_until = None;
+        stake.is_slashed = false;
+        stake.bump = ctx.bumps.agent_stake;
+        
+        agent.stake_amount = stake_lamports;
+        agent.staked_at = Some(now);
+        agent.verification_tier = 2; // Secured tier
+        
+        emit!(StakeDeposited { agent_id: agent.key(), amount: stake_lamports });
+        Ok(())
+    }
+
+    /// Add to existing stake (increases stake amount)
+    pub fn add_stake(ctx: Context<AddStake>, additional_lamports: u64) -> Result<()> {
+        require!(additional_lamports > 0, SaidError::StakeTooLow);
+        require!(ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority, SaidError::Unauthorized);
+        require!(ctx.accounts.agent_stake.amount > 0, SaidError::NoActiveStake);
+        require!(!ctx.accounts.agent_stake.is_slashed, SaidError::StakeSlashed);
+        require!(ctx.accounts.agent_stake.cooldown_until.is_none(), SaidError::AlreadyUnstaking);
+        
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer { from: ctx.accounts.authority.to_account_info(), to: ctx.accounts.agent_stake.to_account_info() },
+            ),
+            additional_lamports,
+        )?;
+        
+        let stake = &mut ctx.accounts.agent_stake;
+        stake.amount = stake.amount.saturating_add(additional_lamports);
+        
+        let agent = &mut ctx.accounts.agent_identity;
+        agent.stake_amount = stake.amount;
+        
+        emit!(StakeDeposited { agent_id: agent.key(), amount: additional_lamports });
+        Ok(())
+    }
+
     pub fn request_unstake(ctx: Context<RequestUnstake>) -> Result<()> {
         require!(ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority, SaidError::Unauthorized);
         let stake = &mut ctx.accounts.agent_stake;
@@ -241,13 +299,13 @@ pub mod said {
     pub fn complete_unstake(ctx: Context<CompleteUnstake>) -> Result<()> {
         require!(ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority, SaidError::Unauthorized);
         let now = Clock::get()?.unix_timestamp;
-        let stake = &mut ctx.accounts.agent_stake;
-        let amount = stake.amount;
+        let amount = ctx.accounts.agent_stake.amount;
         require!(amount > 0, SaidError::NoActiveStake);
-        require!(stake.cooldown_until.is_some(), SaidError::UnstakeNotRequested);
-        require!(now >= stake.cooldown_until.unwrap(), SaidError::CooldownNotComplete);
+        require!(ctx.accounts.agent_stake.cooldown_until.is_some(), SaidError::UnstakeNotRequested);
+        require!(now >= ctx.accounts.agent_stake.cooldown_until.unwrap(), SaidError::CooldownNotComplete);
         **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= amount;
         **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += amount;
+        let stake = &mut ctx.accounts.agent_stake;
         stake.amount = 0;
         stake.cooldown_until = None;
         let agent = &mut ctx.accounts.agent_identity;
@@ -261,8 +319,7 @@ pub mod said {
 
     pub fn emergency_unstake(ctx: Context<EmergencyUnstake>) -> Result<()> {
         require!(ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority, SaidError::Unauthorized);
-        let stake = &mut ctx.accounts.agent_stake;
-        let amount = stake.amount;
+        let amount = ctx.accounts.agent_stake.amount;
         require!(amount > 0, SaidError::NoActiveStake);
         let penalty = (amount as u128 * EMERGENCY_UNSTAKE_PENALTY_BPS as u128 / 10_000) as u64;
         let payout = amount.saturating_sub(penalty);
@@ -270,6 +327,7 @@ pub mod said {
         **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? += penalty;
         **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= payout;
         **ctx.accounts.authority.to_account_info().try_borrow_mut_lamports()? += payout;
+        let stake = &mut ctx.accounts.agent_stake;
         stake.amount = 0;
         stake.cooldown_until = None;
         let agent = &mut ctx.accounts.agent_identity;
@@ -284,24 +342,26 @@ pub mod said {
     pub fn slash_agent(ctx: Context<SlashAgent>, severity_bps: u16) -> Result<()> {
         require!(ctx.accounts.admin.key() == TREASURY_AUTHORITY, SaidError::UnauthorizedAuthority);
         require!(severity_bps <= 10_000, SaidError::InvalidSeverity);
-        let stake = &mut ctx.accounts.agent_stake;
-        let agent = &mut ctx.accounts.agent_identity;
-        require!(stake.amount > 0, SaidError::NoActiveStake);
-        let slash_amount = (stake.amount as u128 * severity_bps as u128 / 10_000) as u64;
+        let cur_amount = ctx.accounts.agent_stake.amount;
+        require!(cur_amount > 0, SaidError::NoActiveStake);
+        let slash_amount = (cur_amount as u128 * severity_bps as u128 / 10_000) as u64;
         require!(slash_amount > 0, SaidError::NothingToSlash);
         **ctx.accounts.agent_stake.to_account_info().try_borrow_mut_lamports()? -= slash_amount;
         **ctx.accounts.treasury.to_account_info().try_borrow_mut_lamports()? += slash_amount;
-        stake.amount = stake.amount.saturating_sub(slash_amount);
+        let remaining = cur_amount.saturating_sub(slash_amount);
+        let stake = &mut ctx.accounts.agent_stake;
+        stake.amount = remaining;
         stake.is_slashed = true;
+        let agent = &mut ctx.accounts.agent_identity;
         agent.slash_count = agent.slash_count.saturating_add(1);
         agent.last_slashed_at = Some(Clock::get()?.unix_timestamp);
-        if stake.amount == 0 {
+        if remaining == 0 {
             agent.is_verified = false;
             agent.verification_tier = 0;
             agent.stake_amount = 0;
             agent.staked_at = None;
         } else {
-            agent.stake_amount = stake.amount;
+            agent.stake_amount = remaining;
         }
         emit!(AgentSlashed { agent_id: agent.key(), amount: slash_amount, severity_bps });
         Ok(())
@@ -361,6 +421,8 @@ pub enum SaidError {
     #[msg("Invalid severity basis points")] InvalidSeverity,
     #[msg("Nothing to slash")] NothingToSlash,
     #[msg("Invalid anchor range")] InvalidAnchorRange,
+    #[msg("Agent must be verified before staking")] NotVerified,
+    #[msg("Agent already has active stake")] AlreadyStaked,
 }
 
 // ============ ACCOUNTS ============
@@ -494,6 +556,28 @@ pub struct ValidateWork<'info> {
     pub validation_record: Account<'info, ValidationRecord>,
     #[account(mut)]
     pub validator: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct Stake<'info> {
+    #[account(mut, seeds = [b"agent", agent_identity.owner.as_ref()], bump = agent_identity.bump, constraint = authority.key() == agent_identity.authority @ SaidError::Unauthorized)]
+    pub agent_identity: Account<'info, AgentIdentity>,
+    #[account(init, payer = authority, space = 8 + AgentStake::INIT_SPACE, seeds = [b"stake", agent_identity.key().as_ref()], bump)]
+    pub agent_stake: Account<'info, AgentStake>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct AddStake<'info> {
+    #[account(mut, seeds = [b"agent", agent_identity.owner.as_ref()], bump = agent_identity.bump)]
+    pub agent_identity: Account<'info, AgentIdentity>,
+    #[account(mut, seeds = [b"stake", agent_identity.key().as_ref()], bump = agent_stake.bump, constraint = agent_stake.agent_id == agent_identity.key())]
+    pub agent_stake: Account<'info, AgentStake>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 

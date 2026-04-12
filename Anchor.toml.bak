@@ -1,5 +1,5 @@
 [toolchain]
-anchor_version = "0.32.1"
+anchor_version = "0.30.1"
 
 [features]
 resolution = true
@@ -12,7 +12,7 @@ said = "Da5VT4SJerSuwnA1byc8W4uD3wYhwD1c9qKFLtN3sCPR"
 said = "SAiD111111111111111111111111111111111111111"
 
 [programs.mainnet]
-said = "ESPreFucjVwtDmZbhtL3JLJ9VxCethNEYtosMQhkcurv"
+said = "5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G"
 
 [registry]
 url = "https://api.apr.dev"
