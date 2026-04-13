@@ -274,9 +274,8 @@ pub mod said {
         require!(additional_lamports > 0, SaidError::StakeTooLow);
         require!(ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority, SaidError::Unauthorized);
         require!(ctx.accounts.agent_stake.amount > 0, SaidError::NoActiveStake);
-        require!(!ctx.accounts.agent_stake.is_slashed, SaidError::StakeSlashed);
         require!(ctx.accounts.agent_stake.cooldown_until.is_none(), SaidError::AlreadyUnstaking);
-        
+
         system_program::transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -284,9 +283,10 @@ pub mod said {
             ),
             additional_lamports,
         )?;
-        
+
         let stake = &mut ctx.accounts.agent_stake;
         stake.amount = stake.amount.saturating_add(additional_lamports);
+        if stake.is_slashed { stake.is_slashed = false; }
         
         let agent = &mut ctx.accounts.agent_identity;
         agent.stake_amount = stake.amount;
@@ -320,11 +320,20 @@ pub mod said {
         stake.amount = 0;
         stake.cooldown_until = None;
         let agent = &mut ctx.accounts.agent_identity;
-        agent.verification_tier = 0;
-        agent.is_verified = false;
+        agent.verification_tier = 1;
         agent.stake_amount = 0;
         agent.staked_at = None;
         emit!(Unstaked { agent_id: agent.key(), amount });
+        Ok(())
+    }
+
+    pub fn cancel_unstake(ctx: Context<CancelUnstake>) -> Result<()> {
+        require!(ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority, SaidError::Unauthorized);
+        let stake = &mut ctx.accounts.agent_stake;
+        require!(stake.amount > 0, SaidError::NoActiveStake);
+        require!(stake.cooldown_until.is_some(), SaidError::UnstakeNotRequested);
+        stake.cooldown_until = None;
+        emit!(UnstakeCancelled { agent_id: stake.agent_id });
         Ok(())
     }
 
@@ -342,8 +351,7 @@ pub mod said {
         stake.amount = 0;
         stake.cooldown_until = None;
         let agent = &mut ctx.accounts.agent_identity;
-        agent.verification_tier = 0;
-        agent.is_verified = false;
+        agent.verification_tier = 1;
         agent.stake_amount = 0;
         agent.staked_at = None;
         emit!(EmergencyUnstaked { agent_id: agent.key(), payout, penalty });
@@ -390,6 +398,8 @@ pub mod said {
         require!(ctx.accounts.authority.key() == ctx.accounts.agent_identity.authority, SaidError::Unauthorized);
         // Continuity: first anchor must start at 1, otherwise next must start at last_seq + 1
         let agent = &mut ctx.accounts.agent_identity;
+        let expected_index = if agent.last_anchor_index == 0 && agent.last_receipt_seq == 0 { 0 } else { agent.last_anchor_index + 1 };
+        require!(anchor_index == expected_index, SaidError::InvalidAnchorRange);
         let expected_start = if agent.last_receipt_seq == 0 { 1 } else { agent.last_receipt_seq + 1 };
         require!(start_seq == expected_start, SaidError::InvalidAnchorRange);
         require!(end_seq >= start_seq, SaidError::InvalidAnchorRange);
@@ -605,6 +615,16 @@ pub struct RequestUnstake<'info> {
 }
 
 #[derive(Accounts)]
+pub struct CancelUnstake<'info> {
+    #[account(mut, seeds = [b"agent", agent_identity.owner.as_ref()], bump = agent_identity.bump)]
+    pub agent_identity: Account<'info, AgentIdentity>,
+    #[account(mut, seeds = [b"stake", agent_identity.key().as_ref()], bump = agent_stake.bump, constraint = agent_stake.agent_id == agent_identity.key())]
+    pub agent_stake: Account<'info, AgentStake>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct CompleteUnstake<'info> {
     #[account(mut, seeds = [b"agent", agent_identity.owner.as_ref()], bump = agent_identity.bump)]
     pub agent_identity: Account<'info, AgentIdentity>,
@@ -717,6 +737,7 @@ pub struct ReceiptAnchor {
 #[event] pub struct FeesWithdrawn { pub authority: Pubkey, pub amount: u64 }
 #[event] pub struct StakeDeposited { pub agent_id: Pubkey, pub amount: u64 }
 #[event] pub struct UnstakeRequested { pub agent_id: Pubkey, pub available_at: i64 }
+#[event] pub struct UnstakeCancelled { pub agent_id: Pubkey }
 #[event] pub struct Unstaked { pub agent_id: Pubkey, pub amount: u64 }
 #[event] pub struct EmergencyUnstaked { pub agent_id: Pubkey, pub payout: u64, pub penalty: u64 }
 #[event] pub struct AgentSlashed { pub agent_id: Pubkey, pub amount: u64, pub severity_bps: u16 }
