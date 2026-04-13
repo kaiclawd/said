@@ -107,6 +107,17 @@ pub mod said {
         agent.last_receipt_seq = 0;
         agent.last_anchor_index = 0;
         agent.bump = ctx.bumps.agent_identity;
+        // Collect verification fee
+        system_program::transfer(
+            CpiContext::new(
+                ctx.accounts.system_program.to_account_info(),
+                system_program::Transfer { from: ctx.accounts.owner.to_account_info(), to: ctx.accounts.treasury.to_account_info() },
+            ),
+            VERIFICATION_FEE,
+        )?;
+        let treasury = &mut ctx.accounts.treasury;
+        treasury.total_collected += VERIFICATION_FEE;
+        // Transfer stake
         system_program::transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -123,7 +134,7 @@ pub mod said {
         stake.bump = ctx.bumps.agent_stake;
         emit!(StakeDeposited { agent_id: agent.key(), amount: stake_lamports });
         emit!(AgentRegistered { agent_id: agent.key(), owner: agent.owner, metadata_uri: agent.metadata_uri.clone() });
-        emit!(AgentVerified { agent_id: agent.key(), fee_paid: 0 });
+        emit!(AgentVerified { agent_id: agent.key(), fee_paid: VERIFICATION_FEE });
         Ok(())
     }
 
@@ -462,6 +473,8 @@ pub struct RegisterAndStake<'info> {
     pub agent_identity: Account<'info, AgentIdentity>,
     #[account(init, payer = owner, space = 8 + AgentStake::INIT_SPACE, seeds = [b"stake", agent_identity.key().as_ref()], bump)]
     pub agent_stake: Account<'info, AgentStake>,
+    #[account(mut, seeds = [b"treasury"], bump = treasury.bump)]
+    pub treasury: Account<'info, Treasury>,
     #[account(mut)]
     pub owner: Signer<'info>,
     pub system_program: Program<'info, System>,
