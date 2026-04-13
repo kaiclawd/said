@@ -14,7 +14,7 @@ security_txt! {
     auditors: "N/A"
 }
 
-declare_id!("ESPreFucjVwtDmZbhtL3JLJ9VxCethNEYtosMQhkcurv");
+declare_id!("5dpw6KEQPn248pnkkaYyWfHwu2nfb3LUMbTucb6LaA8G");
 
 // ============ HARDCODED CONSTANTS ============
 pub const TREASURY_AUTHORITY: Pubkey = pubkey!("H8nKbwHTTmnjgnsvqxRDpoEcTkU6uoqs4DcLm4kY55Wp");
