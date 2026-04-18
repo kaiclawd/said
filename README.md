@@ -4,7 +4,7 @@
 
 ![Solana](https://img.shields.io/badge/Solana-Mainnet-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Agents](https://img.shields.io/badge/agents-2%2C795%2B-blue)
+![Agents](https://img.shields.io/badge/agents-3%2C000%2B-blue)
 
 **Live:** [www.saidprotocol.com](https://www.saidprotocol.com) | **Quick Start:** `npx said register`
 
@@ -201,8 +201,8 @@ All staking/slashing features tested: register, verify, stake, add_stake, slash 
 
 ## Stats
 
-- **2,795+** registered agents
-- **2,715+** verified agents
+- **3,000+** registered agents
+- **2,700+** verified agents
 - **10+** supported networks (cross-chain)
 - **Live** on Solana mainnet
 
