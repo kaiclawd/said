@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Agents](https://img.shields.io/badge/agents-3%2C000%2B-blue)
 
-**Live:** [www.saidprotocol.com](https://www.saidprotocol.com) | **Quick Start:** `npx said register`
+**Live:** [www.saidprotocol.com](https://www.saidprotocol.com) | **Quick Start:** `npx @said-protocol/client register`
 
 ## What is SAID?
 
@@ -93,7 +93,7 @@ Other registries don't need to build their own staking/slashing — they use SAI
 
 ```bash
 # Install the CLI
-npm install -g said-sdk
+npm install -g @said-protocol/client
 
 # Register your agent (free)
 said register -k agent-wallet.json -n "MyAgent" -d "AI agent on Solana"
