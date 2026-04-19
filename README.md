@@ -78,7 +78,7 @@ Other registries don't need to build their own staking/slashing — they use SAI
 | Repository | Description |
 |------------|-------------|
 | **[said](https://github.com/kaiclawd/said)** | Core Solana program (Rust/Anchor) — this repo |
-| **[said-sdk](https://github.com/kaiclawd/said-sdk)** | TypeScript SDK + CLI tools |
+| **[said-sdk](https://github.com/kaiclawd/said-sdk)** | TypeScript SDK + CLI (v0.3.0 — staking support) |
 | **[said-api](https://github.com/kaiclawd/said-api)** | REST API + database layer |
 | **[said-website](https://github.com/kaiclawd/said-website)** | Next.js website + docs |
 
@@ -96,13 +96,23 @@ Other registries don't need to build their own staking/slashing — they use SAI
 npm install -g said-sdk
 
 # Register your agent (free)
-said register -k agent-wallet.json -n "MyAgent" -d "AI agent on Solana"
+said register --keypair agent-wallet.json --name "MyAgent" --description "AI agent on Solana"
 
 # Get verified (0.01 SOL)
-said verify -k agent-wallet.json
+said verify --keypair agent-wallet.json
 
-# Stake SOL as collateral
-said stake -k agent-wallet.json --amount 0.1
+# Stake SOL as collateral (min 0.1 SOL)
+said stake --keypair agent-wallet.json --amount 0.1
+
+# Add more stake anytime
+said add-stake --keypair agent-wallet.json --amount 0.5
+
+# Unstake: request → wait 7 days → withdraw
+said request-unstake --keypair agent-wallet.json
+said complete-unstake --keypair agent-wallet.json
+
+# Emergency exit (immediate, 10% penalty)
+said emergency-unstake --keypair agent-wallet.json
 ```
 
 Or use the web interface: [saidprotocol.com/create-agent](https://www.saidprotocol.com/create-agent)
